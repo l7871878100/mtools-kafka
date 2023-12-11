@@ -1,0 +1,16 @@
+[package]
+name = "mtools"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+eframe = "0.24.1"
+egui_extras = { version = "0.24.2", features = ["all_loaders"] }
+image = { version = "0.24.7", features = ["png", "jpeg"] }
+kafka = "0.10.0"
+platform-dirs = "0.3.0"
+serde = "1.0.193"
+serde_derive = "1.0.193"
+serde_json = "1.0.108"
