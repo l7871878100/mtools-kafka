@@ -31,6 +31,7 @@ struct ToolApp {
     current_offset_type: String,
     current_messages: Vec<KafkaMessage>,
     partition_offsets: Vec<PartitionOffset>,
+    value_filter: String,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -46,26 +47,30 @@ struct ToolConfig {
 }
 
 impl ToolApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> ToolApp {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // 添加中文字体支持，因为egui默认不支持中文
         let mut fonts = eframe::egui::FontDefinitions::default();
         fonts.font_data.insert("my_font".to_owned(),
                                FontData::from_static(include_bytes!("../HarmonyOS_Sans_SC_Regular.ttf"))); // .ttf and .otf supported
 
-// Put my font first (highest priority):
         fonts.families.get_mut(&FontFamily::Proportional).unwrap()
             .insert(0, "my_font".to_owned());
 
-// Put my font as last fallback for monospace:
         fonts.families.get_mut(&FontFamily::Monospace).unwrap()
             .push("my_font".to_owned());
 
         cc.egui_ctx.set_fonts(fonts);
-        ToolApp {
-            current_offset_type: "起点".to_owned(),
+        // 初始化
+        let mut app = ToolApp {
+            current_offset_type: "起始".to_owned(),
             ..ToolApp::default()
-        }
+        };
+        // 加载配置
+        app.load_config();
+        app
     }
 
+    // 保存配置
     pub fn save_config(&mut self) {
         let mut file = OpenOptions::new()
             .read(false)
@@ -77,6 +82,7 @@ impl ToolApp {
             .unwrap();
     }
 
+    // 启动加载配置
     pub fn load_config(&mut self) {
         let path = PathBuf::from(".config");
         if path.exists() {
@@ -90,6 +96,7 @@ impl ToolApp {
             match data {
                 Ok(data) => self.config = data,
                 Err(e) => {
+                    // 加载失败,删除旧配置
                     println!("{:?}", e);
                     fs::remove_file(&path).unwrap()
                 }
@@ -100,6 +107,7 @@ impl ToolApp {
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 struct KafkaConfig {
+    id: String,
     group_name: String,
     name: String,
     host: String,
@@ -111,7 +119,7 @@ struct KafkaConfig {
 
 impl eframe::App for ToolApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.load_config();
+        // 菜单栏
         egui::TopBottomPanel::top("main_top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.menu_button("连接", |ui| {
@@ -126,6 +134,7 @@ impl eframe::App for ToolApp {
                 });
             });
         });
+        // 左侧栏
         egui::SidePanel::left("main_left_side").show(ctx, |ui| {
             let mut group_names = vec![];
 
@@ -158,21 +167,20 @@ impl eframe::App for ToolApp {
             }
         });
 
+        // 主窗口
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.panel_id.as_str() {
                 "list" => {
+                // 数据页面
+                //     数据页面的菜单tab按钮
                     egui::TopBottomPanel::top("list_top_panel").show(ctx, |ui| {
                         ui.horizontal(|ui| {
-                            // ui.menu_button("配置", |ui| {
                             if ui.button("配置").clicked() {
                                 self.list_panel_id = Some("configuration".to_owned());
                             };
-                            // });
-                            // ui.menu_button("帮助", |ui| {
                             if ui.button("数据").clicked() {
                                 self.list_panel_id = Some("data".to_owned());
                             };
-                            // });
                         });
                     });
                     ui.horizontal(|ui| {
@@ -193,13 +201,13 @@ impl eframe::App for ToolApp {
                                                 egui::ComboBox::from_label("")
                                                     .selected_text(self.current_offset_type.as_str())
                                                     .show_ui(ui, |ui| {
-                                                        ui.selectable_value(&mut self.current_offset_type, "起点".to_owned(), "起点");
+                                                        ui.selectable_value(&mut self.current_offset_type, "起始".to_owned(), "起始");
                                                         ui.selectable_value(&mut self.current_offset_type, "最新".to_owned(), "最新");
                                                     },
                                                     );
 
                                                 ui.label("  ");
-                                                ui.label("获取数量:");
+                                                ui.label("拉取数量:");
                                                 ui.add(egui::DragValue::new(
                                                     &mut self.current_config.poll_rows,
                                                 ));
@@ -212,7 +220,13 @@ impl eframe::App for ToolApp {
                                                     client.load_metadata(&vec![self.current_topic.clone()]).unwrap();
 
                                                     match self.current_offset_type.as_str() {
-                                                        "起点" => {}
+                                                        "起始" => {
+                                                            let topic_partition_offset = client.fetch_offsets(&vec![self.current_topic.clone()], FetchOffset::Earliest).unwrap();
+                                                            let partition_offsets = topic_partition_offset.get(self.current_topic.as_str()).unwrap();
+                                                            for po in partition_offsets {
+                                                                client.commit_offset(KAFKA_GROUP_ID, self.current_topic.as_str(), po.partition, po.offset).unwrap();
+                                                            }
+                                                        }
                                                         _ => {
                                                             let topic_partition_offset = client.fetch_offsets(&vec![self.current_topic.clone()], FetchOffset::Latest).unwrap();
                                                             let partition_offsets = topic_partition_offset.get(self.current_topic.as_str()).unwrap();
@@ -239,15 +253,15 @@ impl eframe::App for ToolApp {
                                                     }
                                                     let mut consumer = Consumer::from_client(client).with_topic(self.current_topic.clone()).with_group(KAFKA_GROUP_ID.to_string())
                                                         .with_fallback_offset(
-                                                        match self.current_offset_type.as_str() {
-                                                            "起点" => {
-                                                                FetchOffset::Earliest
+                                                            match self.current_offset_type.as_str() {
+                                                                "起始" => {
+                                                                    FetchOffset::Earliest
+                                                                }
+                                                                _ => {
+                                                                    FetchOffset::Latest
+                                                                }
                                                             }
-                                                            _ => {
-                                                                FetchOffset::Latest
-                                                            }
-                                                        }
-                                                    )
+                                                        )
                                                         .create().unwrap();
                                                     loop {
                                                         let ms = &consumer.poll().unwrap();
@@ -262,7 +276,7 @@ impl eframe::App for ToolApp {
                                                                     value: String::from_utf8_lossy(&msg.value).parse().unwrap(),
                                                                 });
                                                             }
-                                                           consumer.consume_messageset(ms).unwrap();
+                                                            consumer.consume_messageset(ms).unwrap();
                                                         }
                                                         consumer.commit_consumed().unwrap();
                                                         if messages.len() == self.current_config.poll_rows {
@@ -295,23 +309,26 @@ impl eframe::App for ToolApp {
                                                     });
                                                     header.col(|ui| {
                                                         ui.label("值");
+                                                        ui.text_edit_singleline(&mut self.value_filter);
                                                     });
                                                 }).body(|mut body| {
                                                 for (index, km) in self.current_messages.iter().enumerate() {
-                                                    body.row(30.0, |mut row| {
-                                                        row.col(|ui| {
-                                                            ui.label((index + 1).to_string());
+                                                    if km.value.contains(&self.value_filter) || self.value_filter.trim().is_empty() {
+                                                        body.row(30.0, |mut row| {
+                                                            row.col(|ui| {
+                                                                ui.label((index + 1).to_string());
+                                                            });
+                                                            row.col(|ui| {
+                                                                ui.label(format!("{}", km.offset.clone()));
+                                                            });
+                                                            row.col(|ui| {
+                                                                ui.label(km.key.clone());
+                                                            });
+                                                            row.col(|ui| {
+                                                                ui.label(km.value.clone());
+                                                            });
                                                         });
-                                                        row.col(|ui| {
-                                                            ui.label(format!("{}", km.offset.clone()));
-                                                        });
-                                                        row.col(|ui| {
-                                                            ui.label(km.key.clone());
-                                                        });
-                                                        row.col(|ui| {
-                                                            ui.label(km.value.clone());
-                                                        });
-                                                    });
+                                                    }
                                                 }
                                             });
                                         });
@@ -323,6 +340,7 @@ impl eframe::App for ToolApp {
                     });
                 }
                 _ => {
+                    // 新键页面
                     ui.horizontal(|ui| {
                         ui.label("分组:");
                         ui.text_edit_singleline(&mut self.temp_config.group_name);
@@ -345,6 +363,9 @@ impl eframe::App for ToolApp {
                     }
                     ui.horizontal(|ui| {
                         if ui.button("保存").clicked() {
+                            if self.temp_config.id.is_empty() {
+                                self.temp_config.id = uuid::Uuid::new_v4().to_string();
+                            }
                             self.config.kafka_configs.push(self.temp_config.clone());
                             self.save_config();
                             ui.horizontal(|ui| {
@@ -378,9 +399,7 @@ impl eframe::App for ToolApp {
 }
 
 fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
-        ..Default::default()
-    };
+    let options = eframe::NativeOptions::default();
 
 
     eframe::run_native(
