@@ -1,5 +1,5 @@
 [package]
-name = "mtools"
+name = "mtools-kafka"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,10 +8,7 @@ edition = "2021"
 [dependencies]
 eframe = "0.24.1"
 egui_extras = { version = "0.24.2", features = ["all_loaders"] }
-image = { version = "0.24.7", features = ["png", "jpeg"] }
 kafka = "0.10.0"
-platform-dirs = "0.3.0"
 serde = "1.0.193"
-serde_derive = "1.0.193"
 serde_json = "1.0.108"
 uuid = { version = "1.6.1", features = ["v4"] }
